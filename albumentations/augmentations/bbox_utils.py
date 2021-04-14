@@ -38,17 +38,17 @@ class BboxProcessor(DataProcessor):
 
     def filter(self, data, rows, cols):
         return filter_bboxes(
-            data, rows, cols, min_area=self.params.min_area, min_visibility=self.params.min_visibility
+            data, rows, cols, min_area=self.params.min_area, min_visibility=self.params.min_visibility, clip_boxes=self.params.clip_boxes
         )
 
     def check(self, data, rows, cols):
-        return check_bboxes(data)
+        return check_bboxes(data, allow_outside_interval=(not self.params.clip_boxes))
 
     def convert_from_albumentations(self, data, rows, cols):
-        return convert_bboxes_from_albumentations(data, self.params.format, rows, cols, check_validity=True)
+        return convert_bboxes_from_albumentations(data, self.params.format, rows, cols, check_validity=True, allow_outside_interval=(not self.params.clip_boxes))
 
     def convert_to_albumentations(self, data, rows, cols):
-        return convert_bboxes_to_albumentations(data, self.params.format, rows, cols, check_validity=True)
+        return convert_bboxes_to_albumentations(data, self.params.format, rows, cols, check_validity=True, allow_outside_interval=(not self.params.clip_boxes))
 
 
 def normalize_bbox(bbox, rows, cols):
@@ -192,7 +192,7 @@ def filter_bboxes_by_visibility(
     return visible_bboxes
 
 
-def convert_bbox_to_albumentations(bbox, source_format, rows, cols, check_validity=False):
+def convert_bbox_to_albumentations(bbox, source_format, rows, cols, check_validity=False, allow_outside_interval=False):
     """Convert a bounding box from a format specified in `source_format` to the format used by albumentations:
     normalized coordinates of top-left and bottom-right corners of the bounding box in a form of
     `(x_min, y_min, x_max, y_max)` e.g. `(0.15, 0.27, 0.67, 0.5)`.
@@ -248,11 +248,11 @@ def convert_bbox_to_albumentations(bbox, source_format, rows, cols, check_validi
     bbox = (x_min, y_min, x_max, y_max) + tail
     bbox = normalize_bbox(bbox, rows, cols)
     if check_validity:
-        check_bbox(bbox)
+        check_bbox(bbox, allow_outside_interval=allow_outside_interval)
     return bbox
 
 
-def convert_bbox_from_albumentations(bbox, target_format, rows, cols, check_validity=False):
+def convert_bbox_from_albumentations(bbox, target_format, rows, cols, check_validity=False, allow_outside_interval=False):
     """Convert a bounding box from the format used by albumentations to a format, specified in `target_format`.
 
     Args:
@@ -279,7 +279,7 @@ def convert_bbox_from_albumentations(bbox, target_format, rows, cols, check_vali
             "Unknown target_format {}. Supported formats are: 'coco', 'pascal_voc' and 'yolo'".format(target_format)
         )
     if check_validity:
-        check_bbox(bbox)
+        check_bbox(bbox, allow_outside_interval=allow_outside_interval)
     bbox = denormalize_bbox(bbox, rows, cols)
     if target_format == "coco":
         (x_min, y_min, x_max, y_max), tail = bbox[:4], tuple(bbox[4:])
@@ -297,12 +297,12 @@ def convert_bbox_from_albumentations(bbox, target_format, rows, cols, check_vali
     return bbox
 
 
-def convert_bboxes_to_albumentations(bboxes, source_format, rows, cols, check_validity=False):
+def convert_bboxes_to_albumentations(bboxes, source_format, rows, cols, check_validity=False, allow_outside_interval=False):
     """Convert a list bounding boxes from a format specified in `source_format` to the format used by albumentations"""
-    return [convert_bbox_to_albumentations(bbox, source_format, rows, cols, check_validity) for bbox in bboxes]
+    return [convert_bbox_to_albumentations(bbox, source_format, rows, cols, check_validity, allow_outside_interval=allow_outside_interval) for bbox in bboxes]
 
 
-def convert_bboxes_from_albumentations(bboxes, target_format, rows, cols, check_validity=False):
+def convert_bboxes_from_albumentations(bboxes, target_format, rows, cols, check_validity=False, allow_outside_interval=False):
     """Convert a list of bounding boxes from the format used by albumentations to a format, specified
     in `target_format`.
 
@@ -317,17 +317,18 @@ def convert_bboxes_from_albumentations(bboxes, target_format, rows, cols, check_
         list[tuple]: List of bounding box.
 
     """
-    return [convert_bbox_from_albumentations(bbox, target_format, rows, cols, check_validity) for bbox in bboxes]
+    return [convert_bbox_from_albumentations(bbox, target_format, rows, cols, check_validity, allow_outside_interval=allow_outside_interval) for bbox in bboxes]
 
 
-def check_bbox(bbox):
+def check_bbox(bbox, allow_outside_interval=False):
     """Check if bbox boundaries are in range 0, 1 and minimums are lesser then maximums"""
-    for name, value in zip(["x_min", "y_min", "x_max", "y_max"], bbox[:4]):
-        if not 0 <= value <= 1:
-            raise ValueError(
-                "Expected {name} for bbox {bbox} "
-                "to be in the range [0.0, 1.0], got {value}.".format(bbox=bbox, name=name, value=value)
-            )
+    if not allow_outside_interval:
+        for name, value in zip(["x_min", "y_min", "x_max", "y_max"], bbox[:4]):
+            if not 0 <= value <= 1:
+                raise ValueError(
+                    "Expected {name} for bbox {bbox} "
+                    "to be in the range [0.0, 1.0], got {value}.".format(bbox=bbox, name=name, value=value)
+                )
     x_min, y_min, x_max, y_max = bbox[:4]
     if x_max <= x_min:
         raise ValueError("x_max is less than or equal to x_min for bbox {bbox}.".format(bbox=bbox))
@@ -335,13 +336,13 @@ def check_bbox(bbox):
         raise ValueError("y_max is less than or equal to y_min for bbox {bbox}.".format(bbox=bbox))
 
 
-def check_bboxes(bboxes):
+def check_bboxes(bboxes, allow_outside_interval=False):
     """Check if bboxes boundaries are in range 0, 1 and minimums are lesser then maximums"""
     for bbox in bboxes:
-        check_bbox(bbox)
+        check_bbox(bbox, allow_outside_interval=allow_outside_interval)
 
 
-def filter_bboxes(bboxes, rows, cols, min_area=0.0, min_visibility=0.0):
+def filter_bboxes(bboxes, rows, cols, min_area=0.0, min_visibility=0.0, clip_boxes=True):
     """Remove bounding boxes that either lie outside of the visible area by more then min_visibility
     or whose area in pixels is under the threshold set by `min_area`. Also it crops boxes to final image size.
 
@@ -360,15 +361,13 @@ def filter_bboxes(bboxes, rows, cols, min_area=0.0, min_visibility=0.0):
     resulting_boxes = []
     for bbox in bboxes:
         transformed_box_area = calculate_bbox_area(bbox, rows, cols)
-        bbox, tail = tuple(np.clip(bbox[:4], 0, 1.0)), tuple(bbox[4:])
-        clipped_box_area = calculate_bbox_area(bbox, rows, cols)
+        clipped_bbox, tail = tuple(np.clip(bbox[:4], 0, 1.0)), tuple(bbox[4:])
+        clipped_box_area = calculate_bbox_area(clipped_bbox, rows, cols)
         if not transformed_box_area or clipped_box_area / transformed_box_area <= min_visibility:
             continue
-        else:
-            bbox = tuple(np.clip(bbox[:4], 0, 1.0))
         if calculate_bbox_area(bbox, rows, cols) <= min_area:
             continue
-        resulting_boxes.append(bbox + tail)
+        resulting_boxes.append((clipped_bbox + tail) if clip_boxes else (bbox + tail))
     return resulting_boxes
 
 

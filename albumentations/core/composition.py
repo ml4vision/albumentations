@@ -427,11 +427,12 @@ class BboxParams(Params):
             Default: `True`
     """
 
-    def __init__(self, format, label_fields=None, min_area=0.0, min_visibility=0.0, check_each_transform=True):
+    def __init__(self, format, label_fields=None, min_area=0.0, min_visibility=0.0, check_each_transform=True, clip_boxes=True):
         super(BboxParams, self).__init__(format, label_fields)
         self.min_area = min_area
         self.min_visibility = min_visibility
         self.check_each_transform = check_each_transform
+        self.clip_boxes = clip_boxes
 
     def _to_dict(self):
         data = super(BboxParams, self)._to_dict()
@@ -440,6 +441,7 @@ class BboxParams(Params):
                 "min_area": self.min_area,
                 "min_visibility": self.min_visibility,
                 "check_each_transform": self.check_each_transform,
+                "clip_boxes": self.clip_boxes
             }
         )
         return data
